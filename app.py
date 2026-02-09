@@ -7,35 +7,27 @@ import os
 st.set_page_config(page_title="POC Troubleshooting Assistant", layout="centered")
 st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")
 
-# Initialize Model with Fallback Logic to prevent 404
-if "model_name" not in st.session_state:
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # Try Flash first, then Pro as a fallback
-        for m in ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro']:
-            try:
-                test_model = genai.GenerativeModel(m)
-                test_model.generate_content("test")
-                st.session_state.model_name = m
-                break
-            except:
-                continue
-    except Exception as e:
-        st.error(f"Configuration Error: Check your API Key in Secrets.")
-        st.stop()
+# Connection Setup
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("Missing GEMINI_API_KEY in Streamlit Secrets.")
+    st.stop()
 
-model = genai.GenerativeModel(st.session_state.get("model_name", "gemini-1.5-flash"))
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# 7. Grounding - Extract text from the manuals
+# Use the stable model ID
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# 7. Grounding - Extract text from the 6 manuals
 @st.cache_data
 def load_manuals():
     text_content = ""
+    # List of files in the repository
     files = ["gluco.pdf", "hemocue correct.pdf", "hepatic piccolo.pdf", "istat.pdf", "piccolo op manual .pdf", "renal piccolo.pdf"]
     for f in files:
         if os.path.exists(f):
             try:
                 reader = PdfReader(f)
-                text_content += f"\n[SOURCE: {f}]\n"
+                text_content += f"\n[DOC: {f}]\n"
                 for page in reader.pages:
                     text_content += page.extract_text() or ""
             except:
@@ -47,7 +39,7 @@ manual_data = load_manuals()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# High-contrast display for tired users
+# High-contrast display for readability
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(f"**{m['content']}**")
@@ -61,11 +53,11 @@ if prompt := st.chat_input("Enter device error or issue"):
     instruction = f"""
     You are a professional technical assistant. Use ONLY the manual data provided.
     RULES:
-    - Format: 'Step X: [Instruction] [One Yes/No or concrete question]'.
-    - Provide only ONE step per turn.
-    - If Piccolo or chemistry disc is mentioned, ask: 'Is this for a Renal or Hepatic perfusion?'
-    - Tone: Neutral and concise. No friendly filler.
-    - If not in manuals, say: 'I couldn't find a specific instruction for this in the manual.'
+    1. Respond ONLY in format: 'Step X: [Instruction] [One Yes/No or concrete question]'.
+    2. Provide only ONE step per turn.
+    3. If Piccolo is mentioned, ask: 'Is this for a Renal or Hepatic perfusion?' before giving steps.
+    4. Neutral tone. No friendly filler or 'lovable' language.
+    5. If not in manuals, say: 'I couldn't find a specific instruction for this in the manual.'
     
     MANUAL DATA:
     {manual_data[:30000]}
@@ -73,8 +65,10 @@ if prompt := st.chat_input("Enter device error or issue"):
 
     with st.chat_message("assistant"):
         try:
-            response = model.generate_content([instruction] + [m["content"] for m in st.session_state.messages])
+            # Combine history for context
+            chat_history = [m["content"] for m in st.session_state.messages]
+            response = model.generate_content([instruction] + chat_history)
             st.markdown(f"**{response.text}**")
             st.session_state.messages.append({"role": "assistant", "content": response.text})
         except Exception as e:
-            st.error(f"System Error: Please ensure your API key is active and the PDFs are uploaded to GitHub.")
+            st.error(f"System error. Verify the API key is valid and active in Google AI Studio.")
