@@ -3,15 +3,22 @@ import google.generativeai as genai
 from pypdf import PdfReader
 import os
 
-# 10. Required Prototype Framing
+# Framing Text
 st.set_page_config(page_title="POC Assistant", layout="centered")
-st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")
+st.markdown("### Prototype: Manual-based troubleshooting assistant. Not a clinical tool.")
 
-# Using your provided key directly to bypass Secret issues for now
-genai.configure(api_key="AIzaSyAP4wxWaItNDOKWbiRqK2QAy-Rr2LCUwt8")
+# Connection Setup
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("Missing GEMINI_API_KEY in Secrets.")
+    st.stop()
+
+# Force the use of the stable API version to fix the 404 error
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Initialize the model
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 7. Grounding - Extract text
+# Extract Manual Text
 @st.cache_data
 def load_manuals():
     text = ""
@@ -21,7 +28,8 @@ def load_manuals():
             try:
                 reader = PdfReader(f)
                 text += f"\n[SOURCE: {f}]\n" + "".join([p.extract_text() or "" for p in reader.pages])
-            except: continue
+            except:
+                continue
     return text
 
 manual_context = load_manuals()
@@ -30,12 +38,15 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(f"**{m['content']}**")
+    with st.chat_message(m["role"]):
+        st.markdown(f"**{m['content']}**")
 
-if prompt := st.chat_input("Enter issue"):
+if prompt := st.chat_input("Enter device issue"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(f"**{prompt}**")
+    with st.chat_message("user"):
+        st.markdown(f"**{prompt}**")
 
+    # Instruction for the model
     instr = f"""
     Use ONLY: {manual_context[:30000]}
     Format: 'Step X: [Instruction] [One Question]'.
@@ -50,4 +61,4 @@ if prompt := st.chat_input("Enter issue"):
             st.markdown(f"**{response.text}**")
             st.session_state.messages.append({"role": "assistant", "content": response.text})
         except Exception as e:
-            st.error(f"Generation Error: {str(e)}")
+            st.error(f"Technical Error: {e}")
