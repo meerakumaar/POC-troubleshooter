@@ -13,7 +13,7 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.stop()
 
 # Configure Gemini with the secret key
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+genai.configure(api_key="AIzaSyAP4wxWaItNDOKWbiRqK2QAy-Rr2LCUwt8")
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 7. Grounding: Extracting text from the 6 uploaded manuals
