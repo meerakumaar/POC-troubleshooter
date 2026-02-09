@@ -7,7 +7,7 @@ st.set_page_config(page_title="POC Assistant", layout="centered")
 st.markdown("### Prototype: Manual-based POC Assistant. Not a clinical tool.")
 
 # Connect to Gemini
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+genai.configure(api_key=st.secrets[" AIzaSyAP4wxWaItNDOKWbiRqK2QAy-Rr2LCUwt8 "])
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 7. Manual Grounding (Extract Text)
