@@ -7,16 +7,19 @@ import os
 st.set_page_config(page_title="POC Assistant", layout="centered")
 st.markdown("### Prototype: Manual-based troubleshooting assistant. Not a clinical tool.")
 
-# Connection Setup - Forcing the STABLE API version
+# Connection Setup - Forcing the STABLE API path
 if "GEMINI_API_KEY" not in st.secrets:
-    st.error("Add GEMINI_API_KEY to Streamlit Secrets.")
+    st.error("Missing GEMINI_API_KEY in Secrets.")
     st.stop()
 
-# This is the secret sauce: forcing the library to use the stable v1 path
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='rest')
+# This is the override to fix the 404: force 'rest' transport and 'v1' version
+genai.configure(
+    api_key=st.secrets["GEMINI_API_KEY"], 
+    transport='rest',
+    client_options={'api_version': 'v1'}
+)
 
-# Using the full model path to avoid 404s
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 7. Grounding - Extract Manual Text
 @st.cache_data
@@ -45,13 +48,13 @@ if prompt := st.chat_input("Enter device issue"):
     with st.chat_message("user"):
         st.markdown(f"**{prompt}**")
 
-    # Instruction for the model
+    # High-pressure troubleshooting logic
     instr = f"""
     Use ONLY: {manual_context[:30000]}
-    Rule 1: Format as 'Step X: [Instruction] [One Question]'.
-    Rule 2: One step at a time. Neutral tone.
-    Rule 3: If Piccolo mentioned, ask 'Renal or Hepatic?' first.
-    Rule 4: If not in manual, say 'I couldn't find a specific instruction for this in the manual.'
+    Format: 'Step X: [Instruction] [One Question]'.
+    One step at a time. Neutral tone.
+    If Piccolo mentioned, ask 'Renal or Hepatic?' first.
+    If not in manual, say 'I couldn't find a specific instruction for this in the manual.'
     """
 
     with st.chat_message("assistant"):
