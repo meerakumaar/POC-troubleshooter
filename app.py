@@ -9,10 +9,17 @@ from google import genai
 # ----------------------------
 # UI (PRD: plain, prototype copy)
 # ----------------------------
-st.set_page_config(page_title="POC Troubleshooting Chat (Prototype)", layout="centered")
-st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")  # PRD framing :contentReference[oaicite:3]{index=3}
+st.set_page_config(
+    page_title="POC Troubleshooting Chat (Prototype)",
+    layout="centered"
+)
 
-# ----:contentReference[oaicite:4]{index=4}---
+st.markdown(
+    "### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. "
+    "Not a clinical tool."
+)
+
+# ----------------------------
 # Gemini client (new SDK)
 # ----------------------------
 if "GEMINI_API_KEY" not in st.secrets:
@@ -20,12 +27,10 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.stop()
 
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
-MODEL_NAME = "gemini-2.5-flash"  # current supported line :contentReference[oaicite:5]{index=5}
+MODEL_NAME = "gemini-2.5-flash"
 
 # ----------------------------
 # Manual loading + lightweight retrieval
-# Put PDFs in a folder named `manuals/` in your repo
 # ----------------------------
 APP_DIR = Path(__file__).parent
 MANUAL_DIR = APP_DIR / "manuals"
@@ -40,8 +45,8 @@ MANUAL_FILES = [
 ]
 
 def _safe_extract(page) -> str:
-    txt = page.extract_text()
-    return txt if txt else ""
+    text = page.extract_text()
+    return text if text else ""
 
 @st.cache_data(show_spinner=False)
 def load_manual_texts() -> dict:
@@ -50,7 +55,9 @@ def load_manual_texts() -> dict:
         fpath = MANUAL_DIR / fname
         if fpath.exists():
             reader = PdfReader(str(fpath))
-            manuals[fname] = "\n".join(_safe_extract(p) for p in reader.pages)
+            manuals[fname] = "\n".join(
+                _safe_extract(p) for p in reader.pages
+            )
     return manuals
 
 def chunk_text(text: str, chunk_size: int = 1400, overlap: int = 150):
@@ -75,7 +82,10 @@ def retrieve_relevant_chunks(query: str, k: int = 4):
     if not chunks:
         return []
 
-    terms = [t for t in re.findall(r"[a-zA-Z0-9\-]+", query.lower()) if len(t) >= 3]
+    terms = [
+        t for t in re.findall(r"[a-zA-Z0-9\-]+", query.lower())
+        if len(t) >= 3
+    ]
     if not terms:
         return []
 
@@ -91,7 +101,7 @@ def retrieve_relevant_chunks(query: str, k: int = 4):
     return [(fname, ch) for _, fname, ch in top]
 
 # ----------------------------
-# Chat state (in-session only)
+# Chat state
 # ----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -106,36 +116,45 @@ for m in st.session_state.messages:
 user_prompt = st.chat_input("Enter issue")
 
 if user_prompt:
-    st.session_state.messages.append({"role": "user", "content": user_prompt})
+    st.session_state.messages.append(
+        {"role": "user", "content": user_prompt}
+    )
     with st.chat_message("user"):
         st.write(user_prompt)
 
     excerpts = retrieve_relevant_chunks(user_prompt, k=4)
 
     if not excerpts:
-        assistant_text = "Step 1:\nNot in manual.\nIs there an error code displayed? (yes/no)"
+        assistant_text = (
+            "Step 1:\n"
+            "Not in manual.\n"
+            "Is there an error code displayed? (yes/no)"
+        )
         with st.chat_message("assistant"):
             st.write(assistant_text)
-        st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": assistant_text}
+        )
         st.stop()
 
-    # PRD style: single step, single action, single yes/no question, no teaching, no extra text :contentReference[oaicite:6]{index=6}
-    excerpt_block = "\n\n".join([f"[SOURCE: {fname}]\n{txt}" :contentReference[oaicite:7]{index=7}erpts])
+    # ---- FIXED LINE IS HERE ----
+    excerpt_block = "\n\n".join(
+        [f"[SOURCE: {fname}]\n{txt}" for fname, txt in excerpts]
+    )
 
     instruction = f"""
 You are a prototype manual-based troubleshooting assistant.
-You MUST follow these rules:
 
-- Use ONLY the provided manual excerpts below. Do NOT guess. Do NOT add “typical” advice.
-- Output EXACTLY ONE step in this format (and nothing else):
+Rules:
+- Use ONLY the provided manual excerpts.
+- Do NOT guess or add external knowledge.
+- Output EXACTLY ONE step in this format and nothing else:
 
 Step 1:
-<Exact instruction or constraint from the manual excerpt>
+<Exact instruction from the manual>
 <ONE yes/no or concrete question>
 
-- Only one action or question total.
-- No bullet lists. No explanations. No teaching.
-- If the excerpt does not contain a relevant instruction, output:
+If nothing relevant exists, output:
 
 Step 1:
 Not in manual.
@@ -150,7 +169,12 @@ Manual excerpts:
             model=MODEL_NAME,
             contents=instruction,
         )
-        assistant_text = (resp.text or "").strip() or "Step 1:\nNot in manual.\nIs there an error code displayed? (yes/no)"
+        assistant_text = (
+            (resp.text or "").strip()
+            or "Step 1:\nNot in manual.\nIs there an error code displayed? (yes/no)"
+        )
         st.write(assistant_text)
 
-    st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+    st.session_state.messages.append(
+        {"role": "assistant", "content": assistant_text}
+    )
