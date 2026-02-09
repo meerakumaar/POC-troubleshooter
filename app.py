@@ -3,32 +3,23 @@ import google.generativeai as genai
 from pypdf import PdfReader
 import os
 
-# Required Prototype Framing
+# 10. Required Framing Text
 st.set_page_config(page_title="POC Assistant", layout="centered")
 st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")
 
-# Connection and Diagnostic Logic
+# Debug: Display library version to confirm the fix
+import google.generativeai as gai_version
+st.sidebar.write(f"Library Version: {gai_version.__version__}")
+
+# Configure API
 if "GEMINI_API_KEY" not in st.secrets:
-    st.error("Missing GEMINI_API_KEY in Secrets dashboard.")
+    st.error("Missing GEMINI_API_KEY in Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Diagnostic: Identify what models this key can actually see
-@st.cache_resource
-def get_model():
-    try:
-        # We try to initialize the model directly
-        return genai.GenerativeModel('gemini-1.5-flash')
-    except Exception as e:
-        # If it fails, list available models to the log
-        models = [m.name for m in genai.list_models()]
-        st.error(f"Model Load Failure. Available models for this key: {models}")
-        return None
-
-model = get_model()
-
-# Manual Extraction
+# 7. Grounding - Extract text
 @st.cache_data
 def load_manuals():
     text = ""
@@ -41,7 +32,7 @@ def load_manuals():
             except: continue
     return text
 
-manual_data = load_manuals()
+manual_context = load_manuals()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -49,13 +40,15 @@ if "messages" not in st.session_state:
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(f"**{m['content']}**")
 
-if prompt := st.chat_input("Enter device issue"):
+if prompt := st.chat_input("Enter issue"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(f"**{prompt}**")
 
+    # Strict Rules for a tired perfusionist
     instr = f"""
-    Use ONLY: {manual_data[:30000]}
+    Use ONLY: {manual_context[:30000]}
     Format: 'Step X: [Instruction] [One Question]'.
+    One step at a time. Neutral tone. No friendly filler.
     If Piccolo mentioned, ask 'Renal or Hepatic?' first.
     If not in manual, say 'I couldn't find a specific instruction for this in the manual.'
     """
