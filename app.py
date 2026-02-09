@@ -1,84 +1,156 @@
-import streamlit as st
-import requests
-import json
-from pypdf import PdfReader
 import os
+from pathlib import Path
+import re
 
-# 10. Required Framing Text
-st.set_page_config(page_title="POC Troubleshooting Assistant", layout="centered")
-st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")
+import streamlit as st
+from pypdf import PdfReader
+from google import genai
 
-# Safety check for the API Key
+# ----------------------------
+# UI (PRD: plain, prototype copy)
+# ----------------------------
+st.set_page_config(page_title="POC Troubleshooting Chat (Prototype)", layout="centered")
+st.markdown("### Prototype: Manual-based troubleshooting assistant for point-of-care measurement devices. Not a clinical tool.")  # PRD framing :contentReference[oaicite:3]{index=3}
+
+# ----:contentReference[oaicite:4]{index=4}---
+# Gemini client (new SDK)
+# ----------------------------
 if "GEMINI_API_KEY" not in st.secrets:
-    st.error("Missing GEMINI_API_KEY in Streamlit Secrets.")
+    st.error("Missing GEMINI_API_KEY in Streamlit secrets.")
     st.stop()
 
-API_KEY = st.secrets["GEMINI_API_KEY"]
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-# 7. Grounding: Extracting text from the 6 uploaded manuals
-@st.cache_data
-def load_manual_context():
-    manual_text = ""
-    files = ["gluco.pdf", "hemocue correct.pdf", "hepatic piccolo.pdf", "istat.pdf", "piccolo op manual .pdf", "renal piccolo.pdf"]
-    for f in files:
-        if os.path.exists(f):
-            try:
-                reader = PdfReader(f)
-                manual_text += f"\n[START: {f}]\n"
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text: manual_text += text
-            except: continue
-    return manual_text
+MODEL_NAME = "gemini-2.5-flash"  # current supported line :contentReference[oaicite:5]{index=5}
 
-context_data = load_manual_context()
+# ----------------------------
+# Manual loading + lightweight retrieval
+# Put PDFs in a folder named `manuals/` in your repo
+# ----------------------------
+APP_DIR = Path(__file__).parent
+MANUAL_DIR = APP_DIR / "manuals"
 
+MANUAL_FILES = [
+    "gluco.pdf",
+    "hemocue correct.pdf",
+    "hepatic piccolo.pdf",
+    "istat.pdf",
+    "piccolo op manual .pdf",
+    "renal piccolo.pdf",
+]
+
+def _safe_extract(page) -> str:
+    txt = page.extract_text()
+    return txt if txt else ""
+
+@st.cache_data(show_spinner=False)
+def load_manual_texts() -> dict:
+    manuals = {}
+    for fname in MANUAL_FILES:
+        fpath = MANUAL_DIR / fname
+        if fpath.exists():
+            reader = PdfReader(str(fpath))
+            manuals[fname] = "\n".join(_safe_extract(p) for p in reader.pages)
+    return manuals
+
+def chunk_text(text: str, chunk_size: int = 1400, overlap: int = 150):
+    chunks = []
+    i = 0
+    while i < len(text):
+        chunks.append(text[i : i + chunk_size])
+        i += max(1, chunk_size - overlap)
+    return chunks
+
+@st.cache_data(show_spinner=False)
+def build_chunks():
+    manuals = load_manual_texts()
+    all_chunks = []
+    for fname, text in manuals.items():
+        for ch in chunk_text(text):
+            all_chunks.append((fname, ch))
+    return all_chunks
+
+def retrieve_relevant_chunks(query: str, k: int = 4):
+    chunks = build_chunks()
+    if not chunks:
+        return []
+
+    terms = [t for t in re.findall(r"[a-zA-Z0-9\-]+", query.lower()) if len(t) >= 3]
+    if not terms:
+        return []
+
+    scored = []
+    for fname, ch in chunks:
+        low = ch.lower()
+        score = sum(low.count(t) for t in terms)
+        if score > 0:
+            scored.append((score, fname, ch))
+
+    scored.sort(reverse=True, key=lambda x: x[0])
+    top = scored[:k]
+    return [(fname, ch) for _, fname, ch in top]
+
+# ----------------------------
+# Chat state (in-session only)
+# ----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
-        st.markdown(f"**{m['content']}**")
+        st.write(m["content"])
 
-if prompt := st.chat_input("Enter device issue or error code..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# ----------------------------
+# Main interaction
+# ----------------------------
+user_prompt = st.chat_input("Enter issue")
+
+if user_prompt:
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
-        st.markdown(f"**{prompt}**")
+        st.write(user_prompt)
 
-    # 6. Response Style & 7. Zero-Hallucination Rules
-    system_instruction = f"""
-    You are a professional POC troubleshooting assistant. Use ONLY this manual data: {context_data[:30000]}
-    
-    RULES:
-    1. FORMAT: 'Step X: [Instruction] [One Yes/No or concrete question]'.
-    2. Respond with ONLY one step at a time.
-    3. PICCOLO RULE: If 'Piccolo' is mentioned, ask 'Is this for a Renal or Hepatic perfusion?' first.
-    4. TONE: Neutral and concise. No conversational filler.
-    5. GROUNDING: If info is missing, say 'I couldn't find a specific instruction for this in the manual.'
-    """
+    excerpts = retrieve_relevant_chunks(user_prompt, k=4)
+
+    if not excerpts:
+        assistant_text = "Step 1:\nNot in manual.\nIs there an error code displayed? (yes/no)"
+        with st.chat_message("assistant"):
+            st.write(assistant_text)
+        st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+        st.stop()
+
+    # PRD style: single step, single action, single yes/no question, no teaching, no extra text :contentReference[oaicite:6]{index=6}
+    excerpt_block = "\n\n".join([f"[SOURCE: {fname}]\n{txt}" :contentReference[oaicite:7]{index=7}erpts])
+
+    instruction = f"""
+You are a prototype manual-based troubleshooting assistant.
+You MUST follow these rules:
+
+- Use ONLY the provided manual excerpts below. Do NOT guess. Do NOT add “typical” advice.
+- Output EXACTLY ONE step in this format (and nothing else):
+
+Step 1:
+<Exact instruction or constraint from the manual excerpt>
+<ONE yes/no or concrete question>
+
+- Only one action or question total.
+- No bullet lists. No explanations. No teaching.
+- If the excerpt does not contain a relevant instruction, output:
+
+Step 1:
+Not in manual.
+Is there an error code displayed? (yes/no)
+
+Manual excerpts:
+{excerpt_block}
+""".strip()
 
     with st.chat_message("assistant"):
-        # Bypassing the Google library version issues with a direct call
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        
-        # Build the conversation history
-        contents = [{"role": "user", "parts": [{"text": system_instruction}]}]
-        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow those rules strictly."}]})
-        
-        for msg in st.session_state.messages:
-            role = "user" if msg["role"] == "user" else "model"
-            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=instruction,
+        )
+        assistant_text = (resp.text or "").strip() or "Step 1:\nNot in manual.\nIs there an error code displayed? (yes/no)"
+        st.write(assistant_text)
 
-        try:
-            response = requests.post(url, headers=headers, data=json.dumps({"contents": contents}))
-            result = response.json()
-            
-            if 'candidates' in result:
-                bot_text = result['candidates'][0]['content']['parts'][0]['text']
-                st.markdown(f"**{bot_text}**")
-                st.session_state.messages.append({"role": "assistant", "content": bot_text})
-            else:
-                st.error(f"API Error: {result.get('error', {}).get('message', 'Unknown error')}")
-        except Exception as e:
-            st.error(f"Connection Error: {e}")
+    st.session_state.messages.append({"role": "assistant", "content": assistant_text})
